@@ -27,6 +27,15 @@ h1{margin:0;font-size:30px;line-height:36px;font-weight:700;letter-spacing:-.5px
 .count{font-size:14px;font-weight:500;color:var(--accent);white-space:nowrap}
 .bar{height:4px;border-radius:2px;background:var(--line2);margin-top:8px;overflow:hidden}
 .bar>i{display:block;height:100%;background:var(--accent);border-radius:2px;transition:width .3s}
+.filters{display:flex;flex-direction:column;gap:8px;margin-top:12px}
+.seg{display:inline-flex;align-self:flex-start;background:var(--line2);border-radius:10px;padding:2px}
+.seg button{border:0;background:none;min-height:36px;padding:0 18px;border-radius:8px;font-size:14px;font-weight:500;color:var(--muted)}
+.seg button.on{background:var(--surface);color:var(--text);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.fchips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin:0 -20px;padding:0 20px}
+.fchips::-webkit-scrollbar{display:none}
+.fchip{flex:none;min-height:36px;padding:0 12px;border-radius:18px;border:1px solid var(--line2);background:var(--surface);font-size:13px;white-space:nowrap;display:inline-flex;align-items:center;gap:6px}
+.fchip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.fchip.on .dot{background:#fff!important}
 .back{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:6px 0;color:var(--accent);font-size:15px;min-height:44px}
 
 main{flex:1;overflow-y:auto;padding:12px 16px 16px;display:flex;flex-direction:column;gap:16px;overscroll-behavior:contain}
@@ -132,7 +141,9 @@ const WD = ['вс','пн','вт','ср','чт','пт','сб'];
 const WD_FULL = ['Воскресенье','Понедельник','Вторник','Среда','Четверг','Пятница','Суббота'];
 const DIR_COLOR = {'ТЛМ':'var(--d-tlm)','Исходящие':'var(--d-out)','Входящие':'var(--d-in)'};
 
-const S = { tasks: [], today: '', dirs: ['ТЛМ','Исходящие','Входящие'], tab: 'today', sub: null, showDone: false, loaded: false, error: '' };
+const S = { tasks: [], today: '', dirs: ['ТЛМ','Исходящие','Входящие'], tab: 'today', sub: null, showDone: false, loaded: false, error: '', wk: { mode: 'week', dir: '' } };
+try { const saved = JSON.parse(localStorage.getItem('rop.wk') || 'null'); if(saved && (saved.mode==='week'||saved.mode==='all')) S.wk = { mode: saved.mode, dir: String(saved.dir||'') }; } catch(e){}
+function saveWk(){ try { localStorage.setItem('rop.wk', JSON.stringify(S.wk)); } catch(e){} }
 
 /* ---------- даты ---------- */
 const toD = s => new Date(Date.UTC(+s.slice(0,4), +s.slice(5,7)-1, +s.slice(8,10), 12));
@@ -266,8 +277,24 @@ function render(){
     }
   }
   else if(S.tab === 'week'){
-    h = '<div class="hrow"><h1>Неделя</h1></div>';
-    const fut = sel.future().sort((a,b)=>a.due.localeCompare(b.due));
+    const all = S.wk.mode === 'all';
+    const df = t => !S.wk.dir || t.dir === S.wk.dir;
+    h = '<div class="hrow"><h1>'+(all?'Все задачи':'Неделя')+'</h1></div>'+
+        '<div class="filters">'+
+          '<div class="seg" role="group" aria-label="Период">'+
+            '<button type="button" data-act="wkmode" data-val="week" aria-pressed="'+!all+'" class="'+(!all?'on':'')+'">Неделя</button>'+
+            '<button type="button" data-act="wkmode" data-val="all" aria-pressed="'+all+'" class="'+(all?'on':'')+'">Все</button>'+
+          '</div>'+
+          '<div class="fchips" role="group" aria-label="Направление">'+
+            ['',...S.dirs].map(d => '<button type="button" data-act="wkdir" data-val="'+esc(d)+'" aria-pressed="'+(S.wk.dir===d)+'" class="fchip'+(S.wk.dir===d?' on':'')+'">'+
+              (d?'<span class="dot" style="background:'+(DIR_COLOR[d]||'var(--d-other)')+'"></span>':'')+esc(d||'Все')+'</button>').join('')+
+          '</div>'+
+        '</div>';
+    if(all){
+      m += section('Просрочено', sel.overdue().filter(df), {due:true}, 'warn');
+      m += section('Сегодня', sel.today().filter(df), {});
+    }
+    const fut = sel.future().filter(df).sort((a,b)=>a.due.localeCompare(b.due));
     const limit = addDays(S.today, 7);
     const days = {};
     fut.filter(t=>t.due<=limit).forEach(t => (days[t.due] = days[t.due] || []).push(t));
@@ -277,8 +304,13 @@ function render(){
       m += section(title, days[d], {});
     });
     m += section('Позже', fut.filter(t=>t.due>limit), {due:true});
-    m += section('Без срока', sel.nodate().sort(byCreatedDesc), {});
-    if(!m) m = emptyHTML('Неделя свободна', 'Задачи со сроком после сегодняшнего дня появятся здесь.');
+    m += section('Без срока', sel.nodate().filter(df).sort(byCreatedDesc), {});
+    if(all){
+      m += section('Жду, без срока', sel.wait().filter(t=>!t.due).filter(df), {});
+      m += section('Входящие', sel.inbox().filter(df).sort(byCreatedDesc), {});
+    }
+    if(!m) m = all ? emptyHTML('Ничего не найдено', S.wk.dir ? 'По направлению «'+S.wk.dir+'» открытых задач нет.' : 'Открытых задач нет.')
+                   : emptyHTML('Неделя свободна', S.wk.dir ? 'По направлению «'+S.wk.dir+'» на неделю ничего.' : 'Задачи со сроком после сегодняшнего дня появятся здесь.');
   }
   else if(S.tab === 'wait'){
     h = '<div class="hrow"><h1>Жду</h1></div>';
@@ -416,6 +448,8 @@ document.addEventListener('click', e => {
   else if(a === 'inbox'){ S.sub = 'inbox'; render(); }
   else if(a === 'back'){ S.sub = null; render(); }
   else if(a === 'showdone'){ S.showDone = !S.showDone; render(); }
+  else if(a === 'wkmode'){ S.wk.mode = el.dataset.val; saveWk(); haptic(); render(); document.getElementById('main').scrollTop = 0; }
+  else if(a === 'wkdir'){ S.wk.dir = el.dataset.val; saveWk(); haptic(); render(); }
   else if(a === 'due'){ update(openId, { due: el.dataset.val }); openSheet(openId); }
   else if(a === 'dir'){ update(openId, { dir: el.dataset.val }); openSheet(openId); }
   else if(a === 'toIdea'){ const id2 = openId; closeSheet(); update(id2, { status:'idea', due:'' }); toast('Перенесла в идеи'); }
