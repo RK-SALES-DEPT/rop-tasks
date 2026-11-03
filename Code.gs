@@ -71,6 +71,13 @@ function setup() {
   Logger.log(JSON.stringify(res));
 }
 
+/** Переподключить вебхук без потери ожидающих сообщений (если бот «залип»). */
+function reconnect() {
+  Logger.log(JSON.stringify(tg('setWebhook', { url: props().getProperty('WEBAPP_URL'), allowed_updates: ['message', 'callback_query'] })));
+  const w = tg('getWebhookInfo', {}).result || {};
+  Logger.log('ожидают доставки: ' + w.pending_update_count + (w.last_error_message ? ', последняя ошибка: ' + w.last_error_message : ''));
+}
+
 /* ───────────── Входная точка ───────────── */
 
 function doPost(e) {
@@ -85,7 +92,8 @@ function doPost(e) {
       cache.put(key, '1', 21600);
       try { handleUpdate(body); } catch (err) { console.error(err); }
     }
-    return ContentService.createTextOutput('ok');
+    // HtmlService отвечает Телеграму сразу кодом 200 (ContentService дал бы редирект 302, и Телеграм повторял бы апдейт).
+    return HtmlService.createHtmlOutput('ok');
   }
 
   try { return json(handleApi(body)); } catch (err) { console.error(err); return json({ ok: false, error: String(err) }); }
